@@ -16,3 +16,10 @@ def normalize_coords(coords, mins=None, maxs=None):
         maxs = coords.max(axis=0)
     normed = (coords - mins) / (maxs - mins)
     return normed, mins, maxs
+
+def normalize_min_max(coords, min=None, max=None):
+    if min is None or max is None:
+        min = coords.min()
+        max = coords.max()
+    normed = (coords - min) / (max - min)
+    return normed, min, max
