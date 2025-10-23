@@ -4,7 +4,7 @@ import time
 
 from jaxtyping import Array
 from functools import partial
-from src.constants import NUM_SEEDS, LOWER_THRESHOLD, UPPER_THRESHOLD
+from src.constants import NUM_SEEDS, LOWER_THRESHOLD, UPPER_THRESHOLD, MAX_CELLS
 
 offset_vectors = jnp.array([[-1, -1], [-1, 0], [-1, 1],
                      [0, -1],  [0, 0],  [0, 1],
@@ -17,7 +17,7 @@ class Voronoi:
     def setup(self, size: int, seeds: Array):
         seeds = jnp.round(jnp.array(seeds)).astype(jnp.int16)
         self.size = size
-        self.numseeds = seeds.shape[0]
+        self.numseeds = len(seeds)
 
         with jax.default_device(jax.devices("cpu")[0]):
             # arr = jnp.zeros((size, size, 2))
@@ -29,12 +29,6 @@ class Voronoi:
             max_exp = int(jnp.floor(jnp.log2(size // 2)))
             # JFA+2 variant for more accurate border
             self.jfa_offsets = [(size // 2) // (2 ** i) for i in range(max_exp + 1)] + [1, 1]
-
-    @staticmethod
-    @jax.jit
-    def _make_seeded_arr(size: int, seeds: Array) -> Array:
-        arr = jnp.zeros((size, size, 2))
-        return arr.at[seeds[:, 0], seeds[:, 1]].set(seeds)
 
     @staticmethod
     @jax.jit
@@ -146,8 +140,8 @@ class Voronoi:
         return border_distance
 
     @staticmethod
-    @partial(jax.jit, static_argnums=1)
-    def get_voro_centroids(index_map: Array, num_seeds: int) -> Array:
+    @jax.jit
+    def _get_voro_centroids_jit(index_map: Array) -> Array:
         # Build grid of coordinate indices
         grid = jnp.arange(index_map.shape[0])
         xx, yy = jnp.meshgrid(grid, grid)
@@ -155,10 +149,10 @@ class Voronoi:
 
         flat_index_map = index_map.ravel()
 
-        sum_x = jnp.bincount(flat_index_map, weights=coords[:, 0], length=num_seeds)
-        sum_y = jnp.bincount(flat_index_map, weights=coords[:, 1], length=num_seeds)
+        sum_x = jnp.bincount(flat_index_map, weights=coords[:, 0], length=MAX_CELLS)
+        sum_y = jnp.bincount(flat_index_map, weights=coords[:, 1], length=MAX_CELLS)
 
-        index_sum = jnp.bincount(flat_index_map, length=num_seeds)
+        index_sum = jnp.bincount(flat_index_map, length=MAX_CELLS)
 
         centroids_x = sum_x / index_sum
         centroids_y = sum_y / index_sum
@@ -166,16 +160,16 @@ class Voronoi:
         return jnp.stack([centroids_x, centroids_y], axis=1)
 
     @staticmethod
-    @partial(jax.jit, static_argnums=2)
-    def get_inscribing_circles(index_map: Array, distance_transform: Array, num_seeds: int):
-        # Build grid of coordinate indices
-        grid = jnp.arange(index_map.shape[0])
-        xx, yy = jnp.meshgrid(grid, grid)
-        coords = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)  # shape (N, 2)
+    def get_voro_centroids(index_map: Array, num_seeds: int):
+        centroids = Voronoi._get_voro_centroids_jit(index_map)
+        return centroids[:num_seeds]
 
+    @staticmethod
+    @jax.jit
+    def _get_inscribing_circles_jit(index_map: Array, distance_transform: Array):
         flat_index_map = index_map.ravel()
         flat_dist_transform = distance_transform.ravel()
-        max_masked_array = jax.ops.segment_max(flat_dist_transform, flat_index_map, num_seeds)
+        max_masked_array = jax.ops.segment_max(flat_dist_transform, flat_index_map, MAX_CELLS)
         seg_max_map = max_masked_array[flat_index_map]
         is_max = (flat_dist_transform == seg_max_map)
         indices = jnp.arange(flat_index_map.size)
@@ -187,7 +181,20 @@ class Voronoi:
             return jnp.min(possible)
 
         # Use vmap to vectorize over segment IDs
-        max_indices = jax.vmap(argmax_group)(jnp.arange(num_seeds))
+        max_indices = jax.vmap(argmax_group)(jnp.arange(MAX_CELLS))
+        return max_indices, max_masked_array
+
+    @staticmethod
+    def get_inscribing_circles(index_map: Array, distance_transform: Array, num_seeds: int):
+        # Build grid of coordinate indices
+        grid = jnp.arange(index_map.shape[0])
+        xx, yy = jnp.meshgrid(grid, grid)
+        coords = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)  # shape (N, 2)
+
+        max_indices_padded, max_masked_array_padded = Voronoi._get_inscribing_circles_jit(index_map, distance_transform)
+        max_indices = max_indices_padded[:num_seeds]
+        max_masked_array = max_masked_array_padded[:num_seeds]
+
         return coords[max_indices], max_masked_array
 
     @staticmethod
@@ -211,14 +218,14 @@ class Voronoi:
         return jnp.stack([lower_pos, upper_pos], axis=1)
 
     @staticmethod
-    @jax.jit
-    def get_index_map(jfa_map: Array, seeds: Array):
+    @partial(jax.jit, static_argnums=2)
+    def get_index_map(jfa_map: Array, seeds: Array, num_seeds: int):
         arr = jfa_map[:, :, 0] # Only select closest seed value
         flat_coords = arr.reshape(-1, arr.shape[-1]) # shape (H*W, 2)
         seeds = jnp.round(jnp.array(seeds)).astype(jnp.int32)
         # Get each pixel's index in seeds (by matching coordinates for each pixel)
         # Broadcasting: (H*W, 1, 2) == (1, num_seeds, 2) ⇒ (H*W, num_seeds)
-        eq = jnp.all(flat_coords[:, None, :] == seeds[None, :, :], axis=-1) # shape (H*W, num_seeds)
+        eq = jnp.all(flat_coords[:, None, :] == seeds[None, :num_seeds, :], axis=-1) # shape (H*W, num_seeds)
         # argmax finds the first True per row
         indices = jnp.argmax(eq, axis=-1)
         # indices: (H*W,), reshape to grid
@@ -292,7 +299,7 @@ def _lbg_jit(jfa_map: Array, data: Array, seeds: Array):
         print("Voronoi size does not match data size")
         return seeds
 
-    index_map = Voronoi.get_index_map(jfa_map, seeds)
+    index_map = Voronoi.get_index_map(jfa_map, seeds, len(seeds))
     border_dist_transform = Voronoi.get_border_distance_transform(jfa_map)
     dist_transform = Voronoi.get_distance_transform(jfa_map, 0)
     _, unit_vectors = Voronoi.get_largest_extent(index_map, dist_transform, seeds)
@@ -303,24 +310,14 @@ def _lbg_jit(jfa_map: Array, data: Array, seeds: Array):
     # Normalize data for optional weighting
     data_normed = (data - data.min()) / (data.max() - data.min())
 
-    # Build grid of coordinate indices
-    grid = jnp.arange(data.shape[0])
-    xx, yy = jnp.meshgrid(grid, grid)
-    coords = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)  # shape (N, 2)
-
     flat_index_map = index_map.ravel()
     flat_weights = data_normed.ravel()
 
     weights_sum = jnp.bincount(flat_index_map, weights=flat_weights, length=len(seeds))
 
-    # lower_mask = weights_sum < LOWER_THRESHOLD
-    # upper_mask = weights_sum > UPPER_THRESHOLD
-
-    # remove_mask = lower_mask | upper_mask  # Logical OR
-    # new_seeds = jnp.concat([centroids[~remove_mask], split_coords[upper_mask].reshape(-1, 2)])
     return weights_sum, centroids, split_coords
 
-def lbg_step(jfa_map: Array, data: Array, seeds: Array):
+def lbg_step(jfa_map: Array, data: Array, seeds: Array, num_seeds: int):
     weights_sum, centroids, split_coords = _lbg_jit(jfa_map, data, seeds)
 
     lower_mask = weights_sum < LOWER_THRESHOLD

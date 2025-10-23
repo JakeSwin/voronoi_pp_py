@@ -15,7 +15,7 @@ from src.constants import LOWER_THRESHOLD, UPPER_THRESHOLD
 
 def main():
     rr.init("voronoi_jump_flooding", spawn=True)
-    rr.save(f"/home/swin/datasets/rerun/lower_{LOWER_THRESHOLD}_upper_{UPPER_THRESHOLD}.rrd")
+    # rr.save(f"/home/swin/datasets/rerun/lower_{LOWER_THRESHOLD}_upper_{UPPER_THRESHOLD}.rrd")
 
     im = Image.open("./images/first000_gt.png")
     jnp_im = jnp.array(im)
@@ -75,7 +75,7 @@ def main():
     jfa_map = vr.jfa()
     border_dist_transform = vr.get_border_distance_transform(jfa_map)
     dist_transform = vr.get_distance_transform(jfa_map, 0)
-    index_map = vr.get_index_map(jfa_map, new_seeds)
+    index_map = vr.get_index_map(jfa_map, new_seeds, num_samples)
     _, unit_vectors = vr.get_largest_extent(index_map, dist_transform, new_seeds)
     circ_points, circ_r = vr.get_inscribing_circles(index_map, border_dist_transform, num_samples)
     palette = vr.create_weighted_palette(index_map, gp_map[0])
@@ -94,7 +94,7 @@ def main():
     count = 0
     while True:
         # new_seeds = lloyd_step(index_map, gp_map[0], new_seeds)
-        new_seeds = lbg_step(jfa_map, gp_map[0], new_seeds)
+        new_seeds = lbg_step(jfa_map, gp_map[0], new_seeds, num_samples)
         prev_num_samples = num_samples
         num_samples = new_seeds.shape[0]
         print(f"{count}): {new_seeds.shape}")
@@ -102,7 +102,7 @@ def main():
         jfa_map = vr.jfa()
         border_dist_transform = vr.get_border_distance_transform(jfa_map)
         dist_transform = vr.get_distance_transform(jfa_map, 0)
-        index_map = vr.get_index_map(jfa_map, new_seeds)
+        index_map = vr.get_index_map(jfa_map, new_seeds, num_samples)
         _, unit_vectors = vr.get_largest_extent(index_map, dist_transform, new_seeds)
         circ_points, circ_r = vr.get_inscribing_circles(index_map, border_dist_transform, num_samples)
         palette = vr.create_weighted_palette(index_map, gp_map[0])

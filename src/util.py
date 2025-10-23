@@ -1,5 +1,7 @@
 import jax.numpy as jnp
 
+from src.constants import MAX_CELLS
+
 def normalize(array):
     mean = jnp.mean(array)
     std = jnp.std(array)
@@ -23,3 +25,9 @@ def normalize_min_max(coords, min=None, max=None):
         max = coords.max()
     normed = (coords - min) / (max - min)
     return normed, min, max
+
+def prepare_seeds(raw_seeds):
+    num_seeds = raw_seeds.shape[0]
+    seeds_padded = jnp.pad(raw_seeds, ((0, MAX_CELLS - num_seeds), (0, 0)))
+    mask = jnp.arange(MAX_CELLS) < num_seeds
+    return seeds_padded, mask
