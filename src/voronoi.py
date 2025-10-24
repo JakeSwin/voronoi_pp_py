@@ -6,9 +6,10 @@ from jaxtyping import Array
 from functools import partial
 from src.constants import NUM_SEEDS, LOWER_THRESHOLD, UPPER_THRESHOLD, MAX_CELLS
 
-offset_vectors = jnp.array([[-1, -1], [-1, 0], [-1, 1],
-                     [0, -1],  [0, 0],  [0, 1],
-                     [1, -1],  [1, 0],  [1, 1]])  # For jump, scale by offset
+offset_vectors = jnp.array(
+    [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 0], [0, 1], [1, -1], [1, 0], [1, 1]]
+)  # For jump, scale by offset
+
 
 class Voronoi:
     def __init__(self, size: int, seeds: Array):
@@ -28,7 +29,10 @@ class Voronoi:
 
             max_exp = int(jnp.floor(jnp.log2(size // 2)))
             # JFA+2 variant for more accurate border
-            self.jfa_offsets = [(size // 2) // (2 ** i) for i in range(max_exp + 1)] + [1, 1]
+            self.jfa_offsets = [(size // 2) // (2**i) for i in range(max_exp + 1)] + [
+                1,
+                1,
+            ]
 
     @staticmethod
     @jax.jit
@@ -40,7 +44,7 @@ class Voronoi:
             shifts = offset_vectors * offset
             candidates = pos + shifts
             candidates = jnp.clip(candidates, 0, size - 1)
-            info = arr[candidates[:,0], candidates[:,1]]
+            info = arr[candidates[:, 0], candidates[:, 1]]
             all_sites = info.reshape(-1, 2)
             dists = jnp.linalg.norm(all_sites - pos, axis=-1)
             # argmin = jnp.argmin(dists)
@@ -48,7 +52,7 @@ class Voronoi:
             # first = all_sites[idxs[0]]
             # second = all_sites[idxs[1]]
             idxs = jnp.argsort(dists)
-            first = all_sites[idxs[0]]                          # Closest
+            first = all_sites[idxs[0]]  # Closest
 
             # Create mask: True for candidates not equal to first
             mask = ~jnp.all(all_sites == first, axis=1)
@@ -64,11 +68,11 @@ class Voronoi:
         return vmapped(grid, grid)
 
     def jfa(self):
-        arr = self.seed_map # Size: (N, N, 2, 2)
+        arr = self.seed_map  # Size: (N, N, 2, 2)
         for offset in self.jfa_offsets:
             arr = self._jfa_step(arr, offset)
         size = arr.shape[0]
-        grid_x, grid_y = jnp.meshgrid(jnp.arange(size), jnp.arange(size), indexing='ij')
+        grid_x, grid_y = jnp.meshgrid(jnp.arange(size), jnp.arange(size), indexing="ij")
         pos_grid = jnp.stack([grid_x, grid_y], axis=-1)  # shape: (N, N, 2)
         first_seed_grid = arr[..., 0, :]
         second_seed_grid = arr[..., 1, :]
@@ -85,7 +89,6 @@ class Voronoi:
         # Stack so output shape is (N, N, 2, 2), order is [closest, second_closest]
         result = jnp.stack([closest, second_closest], axis=-2)
         return result
-
 
     @staticmethod
     @jax.jit
@@ -117,7 +120,7 @@ class Voronoi:
         # jfa_map[..., 0, :] = closest seed, jfa_map[..., 1, :] = second closest seed
 
         H, W, _, _ = jfa_map.shape
-        yy, xx = jnp.meshgrid(jnp.arange(H), jnp.arange(W), indexing='ij')
+        yy, xx = jnp.meshgrid(jnp.arange(H), jnp.arange(W), indexing="ij")
         pos = jnp.stack([yy, xx], axis=-1)
 
         a = jfa_map[..., 0, :]  # Closest seed coord
@@ -169,14 +172,18 @@ class Voronoi:
     def _get_inscribing_circles_jit(index_map: Array, distance_transform: Array):
         flat_index_map = index_map.ravel()
         flat_dist_transform = distance_transform.ravel()
-        max_masked_array = jax.ops.segment_max(flat_dist_transform, flat_index_map, MAX_CELLS)
+        max_masked_array = jax.ops.segment_max(
+            flat_dist_transform, flat_index_map, MAX_CELLS
+        )
         seg_max_map = max_masked_array[flat_index_map]
-        is_max = (flat_dist_transform == seg_max_map)
+        is_max = flat_dist_transform == seg_max_map
         indices = jnp.arange(flat_index_map.size)
 
         def argmax_group(seg_id):
             # Vectorized version
-            possible = jnp.where((flat_index_map == seg_id) & is_max, indices, flat_index_map.size)
+            possible = jnp.where(
+                (flat_index_map == seg_id) & is_max, indices, flat_index_map.size
+            )
             # Returns the first occurrence of the max
             return jnp.min(possible)
 
@@ -185,13 +192,17 @@ class Voronoi:
         return max_indices, max_masked_array
 
     @staticmethod
-    def get_inscribing_circles(index_map: Array, distance_transform: Array, num_seeds: int):
+    def get_inscribing_circles(
+        index_map: Array, distance_transform: Array, num_seeds: int
+    ):
         # Build grid of coordinate indices
         grid = jnp.arange(index_map.shape[0])
         xx, yy = jnp.meshgrid(grid, grid)
         coords = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)  # shape (N, 2)
 
-        max_indices_padded, max_masked_array_padded = Voronoi._get_inscribing_circles_jit(index_map, distance_transform)
+        max_indices_padded, max_masked_array_padded = (
+            Voronoi._get_inscribing_circles_jit(index_map, distance_transform)
+        )
         max_indices = max_indices_padded[:num_seeds]
         max_masked_array = max_masked_array_padded[:num_seeds]
 
@@ -199,16 +210,29 @@ class Voronoi:
 
     @staticmethod
     @jax.jit
-    def get_largest_extent(index_map: Array, distance_transform: Array, seeds: Array):
+    def get_largest_extent(
+        index_map: Array, distance_transform: Array, padded_seeds: Array, mask: Array
+    ):
+        # Build grid of coordinate indices
+        grid = jnp.arange(index_map.shape[0])
+        xx, yy = jnp.meshgrid(grid, grid)
+        coords = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)  # shape (N, 2)
+
         # Gets the coordinate of the max value for distance transform from closest seed
-        coords, max_masked_array = Voronoi.get_inscribing_circles(
-            index_map, distance_transform, len(seeds)
+        max_indices, max_masked_array = Voronoi._get_inscribing_circles_jit(
+            index_map, distance_transform
         )
 
-        seed_vectors = coords - seeds # (num_seeds, 2)
-        seed_norms = jnp.linalg.norm(seed_vectors, axis=1, keepdims=True)  # (num_seeds, 1)
-        unit_vectors = seed_vectors / (seed_norms + 1e-8)  # Add epsilon to avoid division by zero
-        return coords, unit_vectors
+        padded_coords = jnp.zeros((MAX_CELLS, 2)).at[mask].set(coords[max_indices])
+
+        seed_vectors = padded_coords - padded_seeds  # (num_seeds, 2)
+        seed_norms = jnp.linalg.norm(
+            seed_vectors, axis=1, keepdims=True
+        )  # (num_seeds, 1)
+        unit_vectors = seed_vectors / (
+            seed_norms + 1e-8
+        )  # Add epsilon to avoid division by zero
+        return padded_coords, unit_vectors
 
     @staticmethod
     @jax.jit
@@ -218,17 +242,20 @@ class Voronoi:
         return jnp.stack([lower_pos, upper_pos], axis=1)
 
     @staticmethod
-    @partial(jax.jit, static_argnums=2)
-    def get_index_map(jfa_map: Array, seeds: Array, num_seeds: int):
-        arr = jfa_map[:, :, 0] # Only select closest seed value
-        flat_coords = arr.reshape(-1, arr.shape[-1]) # shape (H*W, 2)
-        seeds = jnp.round(jnp.array(seeds)).astype(jnp.int32)
+    @jax.jit
+    def get_index_map(jfa_map: Array, padded_seeds: Array, num_seeds: int):
+        arr = jfa_map[:, :, 0]  # Only select closest seed value
+        flat_coords = arr.reshape(-1, arr.shape[-1])  # shape (H*W, 2)
+        padded_seeds = jnp.round(jnp.array(padded_seeds)).astype(jnp.int32)
         # Get each pixel's index in seeds (by matching coordinates for each pixel)
         # Broadcasting: (H*W, 1, 2) == (1, num_seeds, 2) ⇒ (H*W, num_seeds)
-        eq = jnp.all(flat_coords[:, None, :] == seeds[None, :num_seeds, :], axis=-1) # shape (H*W, num_seeds)
+        eq = jnp.all(
+            flat_coords[:, None, :] == padded_seeds[None, :, :], axis=-1
+        )  # shape (H*W, num_seeds)
         # argmax finds the first True per row
         indices = jnp.argmax(eq, axis=-1)
         # indices: (H*W,), reshape to grid
+        indices = jnp.where(indices > num_seeds, 0, indices)
         arr2d = indices.reshape(arr.shape[0], arr.shape[1])
         return arr2d
 
@@ -243,13 +270,16 @@ class Voronoi:
 
         avg_voro_w = weights_sum / index_sum
 
-        palette = jnp.stack([avg_voro_w*255, avg_voro_w*255, avg_voro_w*255], axis=1)
+        palette = jnp.stack(
+            [avg_voro_w * 255, avg_voro_w * 255, avg_voro_w * 255], axis=1
+        )
         palette = jnp.round(palette).astype(jnp.int32)
 
         return palette
 
     def create_random_palette(self):
         with jax.default_device(jax.devices("cpu")[0]):
+
             def set_colour(i):
                 key = jax.random.PRNGKey(i)
                 return (jax.random.uniform(key, shape=(3,)) * 255).astype(jnp.int32)
@@ -258,6 +288,7 @@ class Voronoi:
 
     def get_colour_map(self, index_map: Array, palette: Array):
         return palette[index_map]
+
 
 @staticmethod
 @jax.jit
@@ -285,27 +316,37 @@ def lloyd_step(index_map: Array, data: Array, seeds: Array) -> Array:
 
     lerp_t = 0.1
     # Avoid division by zero for empty regions
-    float_seeds = jnp.stack([
-        jnp.where(weights_sum > 0, sum_y / weights_sum, seeds[:, 0]),
-        jnp.where(weights_sum > 0, sum_x / weights_sum, seeds[:, 1])
-    ], axis=-1)
+    float_seeds = jnp.stack(
+        [
+            jnp.where(weights_sum > 0, sum_y / weights_sum, seeds[:, 0]),
+            jnp.where(weights_sum > 0, sum_x / weights_sum, seeds[:, 1]),
+        ],
+        axis=-1,
+    )
     new_seeds = (1 - lerp_t) * seeds + lerp_t * float_seeds
     return new_seeds
 
+
 @staticmethod
 @jax.jit
-def _lbg_jit(jfa_map: Array, data: Array, seeds: Array):
+def _lbg_jit(jfa_map: Array, data: Array, padded_seeds: Array, mask: Array):
     if data.shape[0] != jfa_map.shape[0] or data.shape[1] != jfa_map.shape[1]:
         print("Voronoi size does not match data size")
         return seeds
 
-    index_map = Voronoi.get_index_map(jfa_map, seeds, len(seeds))
+    num_seeds = len(seeds)
+
+    index_map = Voronoi.get_index_map(jfa_map, padded_seeds, num_seeds)
     border_dist_transform = Voronoi.get_border_distance_transform(jfa_map)
     dist_transform = Voronoi.get_distance_transform(jfa_map, 0)
-    _, unit_vectors = Voronoi.get_largest_extent(index_map, dist_transform, seeds)
-    _, circ_r = Voronoi.get_inscribing_circles(index_map, border_dist_transform, len(seeds))
-    centroids = Voronoi.get_voro_centroids(index_map, len(seeds))
-    split_coords = Voronoi.get_split(unit_vectors, circ_r/2, centroids)
+    _, unit_vectors = Voronoi.get_largest_extent(
+        index_map, dist_transform, padded_seeds, mask
+    )
+    _, circ_r = Voronoi.get_inscribing_circles(
+        index_map, border_dist_transform, num_seeds
+    )
+    centroids = Voronoi.get_voro_centroids(index_map, num_seeds)
+    split_coords = Voronoi.get_split(unit_vectors, circ_r / 2, centroids)
 
     # Normalize data for optional weighting
     data_normed = (data - data.min()) / (data.max() - data.min())
@@ -313,9 +354,10 @@ def _lbg_jit(jfa_map: Array, data: Array, seeds: Array):
     flat_index_map = index_map.ravel()
     flat_weights = data_normed.ravel()
 
-    weights_sum = jnp.bincount(flat_index_map, weights=flat_weights, length=len(seeds))
+    weights_sum = jnp.bincount(flat_index_map, weights=flat_weights, length=MAX_CELLS)
 
     return weights_sum, centroids, split_coords
+
 
 def lbg_step(jfa_map: Array, data: Array, seeds: Array, num_seeds: int):
     weights_sum, centroids, split_coords = _lbg_jit(jfa_map, data, seeds)
@@ -324,7 +366,9 @@ def lbg_step(jfa_map: Array, data: Array, seeds: Array, num_seeds: int):
     upper_mask = weights_sum > UPPER_THRESHOLD
 
     remove_mask = lower_mask | upper_mask  # Logical OR
-    new_seeds = jnp.concat([centroids[~remove_mask], split_coords[upper_mask].reshape(-1, 2)])
+    new_seeds = jnp.concat(
+        [centroids[~remove_mask], split_coords[upper_mask].reshape(-1, 2)]
+    )
     return new_seeds
 
 
