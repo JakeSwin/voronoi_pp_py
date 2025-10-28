@@ -9,13 +9,13 @@ from PIL import Image
 
 from src.voronoi import Voronoi, lloyd_step, lbg_step
 from src.gp import GP
-from src.util import normalize, normalize_coords
+from src.util import normalize, normalize_coords, jaccard_similarity
 from src.sample import weighted_sample_elimination
 from src.constants import LOWER_THRESHOLD, UPPER_THRESHOLD
 
 def main():
     rr.init("voronoi_jump_flooding", spawn=True)
-    rr.save(f"/home/swin/datasets/rerun/lower_{LOWER_THRESHOLD}_upper_{UPPER_THRESHOLD}.rrd")
+    # rr.save(f"/home/swin/datasets/rerun/lower_{LOWER_THRESHOLD}_upper_{UPPER_THRESHOLD}.rrd")
 
     im = Image.open("./images/first000_gt.png")
     jnp_im = jnp.array(im)
@@ -68,7 +68,10 @@ def main():
     #         gp_samples.append([x, y])
 
     # new_seeds = jnp.array(gp_samples)
-    new_seeds = jnp.array([[texture_size/2, texture_size/2]])
+    # new_seeds = jnp.array([[texture_size/2, texture_size/2]])
+    key = jax.random.PRNGKey(texture_size)
+    with jax.default_device(jax.devices("cpu")[0]):
+        new_seeds = (jax.random.uniform(key, shape=(500, 2)) * texture_size)
     num_samples = new_seeds.shape[0]
 
     vr = Voronoi(texture_size, new_seeds)
@@ -94,7 +97,8 @@ def main():
     count = 0
     while True:
         # new_seeds = lloyd_step(index_map, gp_map[0], new_seeds)
-        new_seeds = lbg_step(jfa_map, gp_map[0], new_seeds)
+        prev_seeds = new_seeds
+        new_seeds, total_changed_percent = lbg_step(jfa_map, gp_map[0], new_seeds)
         prev_num_samples = num_samples
         num_samples = new_seeds.shape[0]
         print(f"{count}): {new_seeds.shape}")
@@ -118,9 +122,8 @@ def main():
         rr.log("GP/Voronoi/InscribingCircles", rr.Points2D(circ_points, radii=circ_r))
         rr.log("GP/Voronoi/Splits", rr.LineStrips2D(np.asarray(split_coords)))
 
-        percentage_difference = abs(prev_num_samples - num_samples) / ((prev_num_samples + num_samples) / 2)
-        print(f"Percentage Difference: {percentage_difference}")
-        if percentage_difference < 0.1:
+        print(f"Total Changed Percent: {total_changed_percent}")
+        if total_changed_percent < 0.25:
             break
         else:
             count += 1

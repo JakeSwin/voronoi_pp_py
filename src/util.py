@@ -23,3 +23,10 @@ def normalize_min_max(coords, min=None, max=None):
         max = coords.max()
     normed = (coords - min) / (max - min)
     return normed, min, max
+
+def jaccard_similarity(a, b):
+    a_set = jnp.unique(a)
+    b_set = jnp.unique(b)
+    intersection = jnp.intersect1d(a_set, b_set).size
+    union = jnp.union1d(a_set, b_set).size
+    return intersection / union

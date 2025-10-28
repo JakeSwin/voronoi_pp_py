@@ -146,7 +146,6 @@ class Voronoi:
         return border_distance
 
     @staticmethod
-    @partial(jax.jit, static_argnums=1)
     def get_voro_centroids(index_map: Array, num_seeds: int) -> Array:
         # Build grid of coordinate indices
         grid = jnp.arange(index_map.shape[0])
@@ -166,7 +165,6 @@ class Voronoi:
         return jnp.stack([centroids_x, centroids_y], axis=1)
 
     @staticmethod
-    @partial(jax.jit, static_argnums=2)
     def get_inscribing_circles(index_map: Array, distance_transform: Array, num_seeds: int):
         # Build grid of coordinate indices
         grid = jnp.arange(index_map.shape[0])
@@ -191,7 +189,6 @@ class Voronoi:
         return coords[max_indices], max_masked_array
 
     @staticmethod
-    @jax.jit
     def get_largest_extent(index_map: Array, distance_transform: Array, seeds: Array):
         # Gets the coordinate of the max value for distance transform from closest seed
         coords, max_masked_array = Voronoi.get_inscribing_circles(
@@ -204,14 +201,12 @@ class Voronoi:
         return coords, unit_vectors
 
     @staticmethod
-    @jax.jit
     def get_split(unit_vectors: Array, dists: Array, seeds: Array):
         lower_pos = seeds + (-dists[:, None] * unit_vectors)
         upper_pos = seeds + (dists[:, None] * unit_vectors)
         return jnp.stack([lower_pos, upper_pos], axis=1)
 
     @staticmethod
-    @jax.jit
     def get_index_map(jfa_map: Array, seeds: Array):
         arr = jfa_map[:, :, 0] # Only select closest seed value
         flat_coords = arr.reshape(-1, arr.shape[-1]) # shape (H*W, 2)
@@ -285,50 +280,40 @@ def lloyd_step(index_map: Array, data: Array, seeds: Array) -> Array:
     new_seeds = (1 - lerp_t) * seeds + lerp_t * float_seeds
     return new_seeds
 
-@staticmethod
-@jax.jit
-def _lbg_jit(jfa_map: Array, data: Array, seeds: Array):
+def lbg_step(jfa_map: Array, data: Array, seeds: Array):
     if data.shape[0] != jfa_map.shape[0] or data.shape[1] != jfa_map.shape[1]:
         print("Voronoi size does not match data size")
         return seeds
+
+    num_seeds = len(seeds)
 
     index_map = Voronoi.get_index_map(jfa_map, seeds)
     border_dist_transform = Voronoi.get_border_distance_transform(jfa_map)
     dist_transform = Voronoi.get_distance_transform(jfa_map, 0)
     _, unit_vectors = Voronoi.get_largest_extent(index_map, dist_transform, seeds)
-    _, circ_r = Voronoi.get_inscribing_circles(index_map, border_dist_transform, len(seeds))
-    centroids = Voronoi.get_voro_centroids(index_map, len(seeds))
+    # _, circ_r = Voronoi.get_inscribing_circles(index_map, border_dist_transform, len(seeds))
+    flat_index_map = index_map.ravel()
+    flat_dist_transform = dist_transform.ravel()
+    circ_r = jax.ops.segment_max(flat_dist_transform, flat_index_map, num_seeds)
+    centroids = Voronoi.get_voro_centroids(index_map, num_seeds)
     split_coords = Voronoi.get_split(unit_vectors, circ_r/2, centroids)
 
     # Normalize data for optional weighting
     data_normed = (data - data.min()) / (data.max() - data.min())
 
-    # Build grid of coordinate indices
-    grid = jnp.arange(data.shape[0])
-    xx, yy = jnp.meshgrid(grid, grid)
-    coords = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)  # shape (N, 2)
-
     flat_index_map = index_map.ravel()
     flat_weights = data_normed.ravel()
 
-    weights_sum = jnp.bincount(flat_index_map, weights=flat_weights, length=len(seeds))
-
-    # lower_mask = weights_sum < LOWER_THRESHOLD
-    # upper_mask = weights_sum > UPPER_THRESHOLD
-
-    # remove_mask = lower_mask | upper_mask  # Logical OR
-    # new_seeds = jnp.concat([centroids[~remove_mask], split_coords[upper_mask].reshape(-1, 2)])
-    return weights_sum, centroids, split_coords
-
-def lbg_step(jfa_map: Array, data: Array, seeds: Array):
-    weights_sum, centroids, split_coords = _lbg_jit(jfa_map, data, seeds)
+    weights_sum = jnp.bincount(flat_index_map, weights=flat_weights, length=num_seeds)
 
     lower_mask = weights_sum < LOWER_THRESHOLD
     upper_mask = weights_sum > UPPER_THRESHOLD
 
     remove_mask = lower_mask | upper_mask  # Logical OR
     new_seeds = jnp.concat([centroids[~remove_mask], split_coords[upper_mask].reshape(-1, 2)])
-    return new_seeds
+
+    total_changed = (lower_mask.sum() + upper_mask.sum()) / num_seeds
+    return new_seeds, total_changed
 
 
 if __name__ == "__main__":
