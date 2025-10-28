@@ -49,7 +49,7 @@ def main():
 
     gp = GP(texture_size, width, height)
     gp.add_samples(samples, weed_chance)
-    opt_post = gp.optimise_posterior_sparse()
+    opt_post = gp.optimise_posterior()
     gp_map = gp.predict_map(opt_post)
     print(gp_map[0].shape)
 
@@ -68,7 +68,10 @@ def main():
     #         gp_samples.append([x, y])
 
     # new_seeds = jnp.array(gp_samples)
-    new_seeds = jnp.array([[texture_size/2, texture_size/2]])
+    # new_seeds = jnp.array([[texture_size/2, texture_size/2]])
+    key = jax.random.PRNGKey(texture_size)
+    with jax.default_device(jax.devices("cpu")[0]):
+        new_seeds = (jax.random.uniform(key, shape=(500, 2)) * texture_size)
     num_samples = new_seeds.shape[0]
 
     vr = Voronoi(texture_size, new_seeds)
@@ -76,7 +79,7 @@ def main():
     border_dist_transform = vr.get_border_distance_transform(jfa_map)
     dist_transform = vr.get_distance_transform(jfa_map, 0)
     index_map = vr.get_index_map(jfa_map, new_seeds, num_samples)
-    _, unit_vectors = vr.get_largest_extent(index_map, dist_transform, new_seeds)
+    _, unit_vectors = vr.get_largest_extent(index_map, dist_transform, new_seeds, num_samples)
     circ_points, circ_r = vr.get_inscribing_circles(index_map, border_dist_transform, num_samples)
     palette = vr.create_weighted_palette(index_map, gp_map[0])
     colour_map = vr.get_colour_map(index_map, palette)
@@ -103,7 +106,7 @@ def main():
         border_dist_transform = vr.get_border_distance_transform(jfa_map)
         dist_transform = vr.get_distance_transform(jfa_map, 0)
         index_map = vr.get_index_map(jfa_map, new_seeds, num_samples)
-        _, unit_vectors = vr.get_largest_extent(index_map, dist_transform, new_seeds)
+        _, unit_vectors = vr.get_largest_extent(index_map, dist_transform, new_seeds, num_samples)
         circ_points, circ_r = vr.get_inscribing_circles(index_map, border_dist_transform, num_samples)
         palette = vr.create_weighted_palette(index_map, gp_map[0])
         colour_map = vr.get_colour_map(index_map, palette)

@@ -5,6 +5,7 @@ import time
 from jaxtyping import Array
 from functools import partial
 from src.constants import NUM_SEEDS, LOWER_THRESHOLD, UPPER_THRESHOLD, MAX_CELLS
+from src.util import prepare_seeds
 
 offset_vectors = jnp.array(
     [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 0], [0, 1], [1, -1], [1, 0], [1, 1]]
@@ -169,7 +170,7 @@ class Voronoi:
 
     @staticmethod
     @jax.jit
-    def _get_inscribing_circles_jit(index_map: Array, distance_transform: Array):
+    def _get_inscribing_circles_jit(index_map: Array, distance_transform: Array, num_seeds: int):
         flat_index_map = index_map.ravel()
         flat_dist_transform = distance_transform.ravel()
         max_masked_array = jax.ops.segment_max(
@@ -179,13 +180,25 @@ class Voronoi:
         is_max = flat_dist_transform == seg_max_map
         indices = jnp.arange(flat_index_map.size)
 
+        # def argmax_group(seg_id):
+        #     if seg_id > num_seeds:
+        #         return -1
+        #     # Vectorized version
+        #     possible = jnp.where(
+        #         (flat_index_map == seg_id) & is_max, indices, flat_index_map.size
+        #     )
+        #     # Returns the first occurrence of the max
+        #     return jnp.min(possible)
+
         def argmax_group(seg_id):
-            # Vectorized version
-            possible = jnp.where(
-                (flat_index_map == seg_id) & is_max, indices, flat_index_map.size
+            return jax.lax.cond(
+                seg_id > num_seeds,
+                lambda _: -1,
+                lambda _: jnp.min(jnp.where(
+                    (flat_index_map == seg_id) & is_max, indices, flat_index_map.size
+                )),
+                operand=None
             )
-            # Returns the first occurrence of the max
-            return jnp.min(possible)
 
         # Use vmap to vectorize over segment IDs
         max_indices = jax.vmap(argmax_group)(jnp.arange(MAX_CELLS))
@@ -201,7 +214,7 @@ class Voronoi:
         coords = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)  # shape (N, 2)
 
         max_indices_padded, max_masked_array_padded = (
-            Voronoi._get_inscribing_circles_jit(index_map, distance_transform)
+            Voronoi._get_inscribing_circles_jit(index_map, distance_transform, num_seeds)
         )
         max_indices = max_indices_padded[:num_seeds]
         max_masked_array = max_masked_array_padded[:num_seeds]
@@ -210,8 +223,8 @@ class Voronoi:
 
     @staticmethod
     @jax.jit
-    def get_largest_extent(
-        index_map: Array, distance_transform: Array, padded_seeds: Array, mask: Array
+    def _get_largest_extent_jit(
+        index_map: Array, distance_transform: Array, padded_seeds: Array, num_seeds: int
     ):
         # Build grid of coordinate indices
         grid = jnp.arange(index_map.shape[0])
@@ -220,10 +233,10 @@ class Voronoi:
 
         # Gets the coordinate of the max value for distance transform from closest seed
         max_indices, max_masked_array = Voronoi._get_inscribing_circles_jit(
-            index_map, distance_transform
+            index_map, distance_transform, num_seeds
         )
 
-        padded_coords = jnp.zeros((MAX_CELLS, 2)).at[mask].set(coords[max_indices])
+        padded_coords = coords[max_indices]
 
         seed_vectors = padded_coords - padded_seeds  # (num_seeds, 2)
         seed_norms = jnp.linalg.norm(
@@ -233,6 +246,14 @@ class Voronoi:
             seed_norms + 1e-8
         )  # Add epsilon to avoid division by zero
         return padded_coords, unit_vectors
+
+    @staticmethod
+    def get_largest_extent(index_map: Array, distance_transform: Array, seeds: Array, num_seeds: int):
+        seeds_padded, _ = prepare_seeds(seeds)
+        padded_coords, unit_vectors = Voronoi._get_largest_extent_jit(
+            index_map, distance_transform, seeds_padded, num_seeds
+        )
+        return padded_coords[:num_seeds], unit_vectors[:num_seeds]
 
     @staticmethod
     @jax.jit
@@ -329,23 +350,23 @@ def lloyd_step(index_map: Array, data: Array, seeds: Array) -> Array:
 
 @staticmethod
 @jax.jit
-def _lbg_jit(jfa_map: Array, data: Array, padded_seeds: Array, mask: Array):
-    if data.shape[0] != jfa_map.shape[0] or data.shape[1] != jfa_map.shape[1]:
-        print("Voronoi size does not match data size")
-        return seeds
-
-    num_seeds = len(seeds)
-
-    index_map = Voronoi.get_index_map(jfa_map, padded_seeds, num_seeds)
-    border_dist_transform = Voronoi.get_border_distance_transform(jfa_map)
-    dist_transform = Voronoi.get_distance_transform(jfa_map, 0)
-    _, unit_vectors = Voronoi.get_largest_extent(
-        index_map, dist_transform, padded_seeds, mask
-    )
-    _, circ_r = Voronoi.get_inscribing_circles(
-        index_map, border_dist_transform, num_seeds
-    )
-    centroids = Voronoi.get_voro_centroids(index_map, num_seeds)
+def _lbg_jit(jfa_map: Array, data: Array, padded_seeds: Array, num_seeds: int):
+    index_map = Voronoi.get_index_map(jfa_map, padded_seeds, num_seeds) # Maybe index +1 for some reason
+    border_dist_transform = Voronoi.get_border_distance_transform(jfa_map) # Working
+    dist_transform = Voronoi.get_distance_transform(jfa_map, 0) # Working
+    _, unit_vectors = Voronoi._get_largest_extent_jit(
+        index_map, dist_transform, padded_seeds, num_seeds
+    ) # Working
+    # _, circ_r = Voronoi.get_inscribing_circles(
+    #     index_map, border_dist_transform, num_seeds
+    # )
+    #
+    flat_index_map = index_map.ravel()
+    flat_dist_transform = dist_transform.ravel()
+    circ_r = jax.ops.segment_max(
+        flat_dist_transform, flat_index_map, MAX_CELLS
+    ) # Working
+    centroids = Voronoi._get_voro_centroids_jit(index_map)
     split_coords = Voronoi.get_split(unit_vectors, circ_r / 2, centroids)
 
     # Normalize data for optional weighting
@@ -360,7 +381,18 @@ def _lbg_jit(jfa_map: Array, data: Array, padded_seeds: Array, mask: Array):
 
 
 def lbg_step(jfa_map: Array, data: Array, seeds: Array, num_seeds: int):
-    weights_sum, centroids, split_coords = _lbg_jit(jfa_map, data, seeds)
+    if data.shape[0] != jfa_map.shape[0] or data.shape[1] != jfa_map.shape[1]:
+        print("Voronoi size does not match data size")
+        return seeds
+
+    seeds_padded, _ = prepare_seeds(seeds)
+
+    weights_sum, centroids, split_coords = _lbg_jit(jfa_map, data, seeds_padded, num_seeds)
+
+    weights_sum = weights_sum[:num_seeds]
+    centroids = centroids[:num_seeds]
+    # split_coords = split_coords[:num_seeds]
+    split_coords = jax.lax.clamp(0.0, split_coords[:num_seeds], float(jfa_map.shape[0]))
 
     lower_mask = weights_sum < LOWER_THRESHOLD
     upper_mask = weights_sum > UPPER_THRESHOLD
