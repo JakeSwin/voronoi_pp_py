@@ -236,6 +236,20 @@ class Voronoi:
 
         return palette
 
+    def create_lbg_palette(self, lower_mask, upper_mask):
+        # Should return a palette with red for lower mask voronois
+        # and green for upper mask voronois, showing what cells
+        # are deleted and what are split
+        size = lower_mask.shape[0]
+
+        red = jnp.tile(jnp.array([252, 54, 5]), (size, 1))
+        white = jnp.tile(jnp.array([252, 252, 252]), (size, 1))
+        green = jnp.tile(jnp.array([54, 252, 5]), (size, 1))
+
+        palette = jnp.where(lower_mask[:, None], red, white)
+        palette = jnp.where(upper_mask[:, None], green, palette)
+        return palette
+
     def create_random_palette(self):
         with jax.default_device(jax.devices("cpu")[0]):
             def set_colour(i):
@@ -296,10 +310,12 @@ def lbg_step(jfa_map: Array, data: Array, seeds: Array):
     flat_dist_transform = dist_transform.ravel()
     circ_r = jax.ops.segment_max(flat_dist_transform, flat_index_map, num_seeds)
     centroids = Voronoi.get_voro_centroids(index_map, num_seeds)
-    split_coords = Voronoi.get_split(unit_vectors, circ_r/2, centroids)
+    split_coords = Voronoi.get_split(unit_vectors, circ_r/2, centroids) # TODO Split coords are slightly different to in main.py
 
     # Normalize data for optional weighting
     data_normed = (data - data.min()) / (data.max() - data.min())
+    # Add a small value to data so that blank areas still create large voronoi cells
+    data_normed = data_normed + 0.0001
 
     flat_index_map = index_map.ravel()
     flat_weights = data_normed.ravel()
@@ -312,8 +328,7 @@ def lbg_step(jfa_map: Array, data: Array, seeds: Array):
     remove_mask = lower_mask | upper_mask  # Logical OR
     new_seeds = jnp.concat([centroids[~remove_mask], split_coords[upper_mask].reshape(-1, 2)])
 
-    total_changed = (lower_mask.sum() + upper_mask.sum()) / num_seeds
-    return new_seeds, total_changed
+    return new_seeds, lower_mask, upper_mask
 
 
 if __name__ == "__main__":
