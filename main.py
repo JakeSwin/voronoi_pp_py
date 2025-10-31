@@ -11,11 +11,12 @@ from src.voronoi import Voronoi, lbg_step
 from src.gps.numpyro_gp import GP
 from src.util import normalize_min_max
 
+
 def main():
     rr.init("voronoi_jump_flooding", spawn=True)
     # rr.save(f"/home/swin/datasets/rerun/lower_{LOWER_THRESHOLD}_upper_{UPPER_THRESHOLD}.rrd")
 
-    im = Image.open("./images/first000_gt.png")
+    im = Image.open("./images/first000_gt_straight.png")
     jnp_im = jnp.array(im)
 
     width = jnp_im.shape[0]
@@ -55,11 +56,12 @@ def main():
     clamped_gp_map = jnp.where(gp_map[0] < 0, 0.0, gp_map[0])
     normed_mean_map, _, _ = normalize_min_max(clamped_gp_map)
     normed_mean_map = normed_mean_map + 0.0001
+    normed_mean_map = normed_mean_map * 255
     print(gp_map[0].shape)
 
     key = jax.random.PRNGKey(texture_size)
     with jax.default_device(jax.devices("cpu")[0]):
-        new_seeds = (jax.random.uniform(key, shape=(500, 2)) * texture_size)
+        new_seeds = jax.random.uniform(key, shape=(500, 2)) * texture_size
     num_samples = new_seeds.shape[0]
 
     vr = Voronoi(texture_size, new_seeds)
@@ -68,11 +70,13 @@ def main():
     dist_transform = vr.get_distance_transform(jfa_map, 0)
     index_map = vr.get_index_map(jfa_map, new_seeds)
     _, unit_vectors = vr.get_largest_extent(index_map, dist_transform, new_seeds)
-    circ_points, circ_r = vr.get_inscribing_circles(index_map, border_dist_transform, num_samples)
+    circ_points, circ_r = vr.get_inscribing_circles(
+        index_map, border_dist_transform, num_samples
+    )
     palette = vr.create_weighted_palette(index_map, clamped_gp_map)
     colour_map = vr.get_colour_map(index_map, palette)
     centroids = vr.get_voro_centroids(index_map, num_samples)
-    split_coords = vr.get_split(unit_vectors, circ_r/2, centroids)
+    split_coords = vr.get_split(unit_vectors, circ_r / 2, centroids)
 
     rr.log("GP/Image", rr.Image(normed_mean_map))
     rr.log("GP/Samples", rr.Points2D(jnp.flip(new_seeds, axis=1)))
@@ -97,13 +101,15 @@ def main():
         dist_transform = vr.get_distance_transform(jfa_map, 0)
         index_map = vr.get_index_map(jfa_map, new_seeds)
         _, unit_vectors = vr.get_largest_extent(index_map, dist_transform, new_seeds)
-        circ_points, circ_r = vr.get_inscribing_circles(index_map, border_dist_transform, num_samples)
+        circ_points, circ_r = vr.get_inscribing_circles(
+            index_map, border_dist_transform, num_samples
+        )
         weighted_palette = vr.create_weighted_palette(index_map, clamped_gp_map)
         lbg_palette = vr.create_lbg_palette(lower_mask, upper_mask)
         colour_map = vr.get_colour_map(index_map, weighted_palette)
         colour_map_splits = vr.get_colour_map(index_map, lbg_palette)
         centroids = vr.get_voro_centroids(index_map, num_samples)
-        split_coords = vr.get_split(unit_vectors, circ_r/2, centroids)
+        split_coords = vr.get_split(unit_vectors, circ_r / 2, centroids)
 
         rr.log("GP/Image", rr.Image(normed_mean_map))
         rr.log("GP/Samples", rr.Points2D(jnp.flip(new_seeds, axis=1)))
@@ -119,6 +125,7 @@ def main():
             break
         else:
             count += 1
+
 
 if __name__ == "__main__":
     main()
