@@ -55,11 +55,25 @@ class GP:
 
     def fit(self, X_train, Y_train):
         self.samples = fit_gp(X_train, Y_train)
+        params = {key: self.samples[key].mean() for key in ["var", "length", "noise"]}
+        print(
+            "Fitted variance:",
+            params["var"],
+            "Fitted length:",
+            params["length"],
+            "Fitted noise:",
+            params["noise"],
+        )
 
     def predict(self, X_train, Y_train, X_test):
         # Use mean or sample of hyperparameters to call predict_gp
         params = {key: self.samples[key].mean() for key in ["var", "length", "noise"]}
-        return predict_gp_jit(X_train, Y_train, X_test, **params)
+        if X_train.shape[0] == 0:
+            mu_s = jnp.zeros(X_test.shape[0])
+            cov_s = kernel_jit(X_test, X_test, params["var"], params["length"], 0)
+            return mu_s, cov_s
+        else:
+            return predict_gp_jit(X_train, Y_train, X_test, **params)
 
     def predict_map(self, X_train, Y_train):
         x_grid = jnp.linspace(0, self.input_width, self.out_size)

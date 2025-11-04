@@ -1,9 +1,7 @@
 import jax
 import jax.numpy as jnp
-import time
 
 from jaxtyping import Array
-from functools import partial
 from src.constants import NUM_SEEDS, LOWER_THRESHOLD, UPPER_THRESHOLD
 
 offset_vectors = jnp.array(

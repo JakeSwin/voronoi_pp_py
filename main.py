@@ -1,5 +1,4 @@
 import jax
-import random
 import jax.numpy as jnp
 import numpy as np
 import rerun as rr
@@ -16,7 +15,7 @@ def main():
     rr.init("voronoi_jump_flooding", spawn=True)
     # rr.save(f"/home/swin/datasets/rerun/lower_{LOWER_THRESHOLD}_upper_{UPPER_THRESHOLD}.rrd")
 
-    im = Image.open("./images/first000_gt_straight.png")
+    im = Image.open("./images/first000_gt.png")
     jnp_im = jnp.array(im)
 
     width = jnp_im.shape[0]
