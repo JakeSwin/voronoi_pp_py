@@ -20,8 +20,12 @@ kernel_jit = jax.jit(kernel, static_argnames=["include_noise"])
 
 def gp_model(X, Y=None, jitter=1e-6):
     var = numpyro.sample("var", dist.LogNormal(0.0, 1.0))
-    length = numpyro.sample("length", dist.LogNormal(0.0, 1.0))
-    noise = numpyro.sample("noise", dist.LogNormal(0.0, 1.0))
+    # length = numpyro.sample("length", dist.LogNormal(0.0, 1.0))
+    # noise = numpyro.sample("noise", dist.LogNormal(0.0, 1.0))
+    # Favor larger smoothness
+    length = numpyro.sample("length", dist.LogNormal(jnp.log(100.0), 0.5))
+    # Prevent noise from shrinking to zero
+    noise = numpyro.sample("noise", dist.LogNormal(-1.0, 0.2))
     k = kernel(X, X, var, length, noise, jitter)
     numpyro.sample("obs", dist.MultivariateNormal(jnp.zeros(X.shape[0]), k), obs=Y)
 
@@ -53,8 +57,8 @@ class GP:
         self.input_width = input_width
         self.input_height = input_height
 
-    def fit(self, X_train, Y_train):
-        self.samples = fit_gp(X_train, Y_train)
+    def fit(self, X_train, Y_train, num_warmup=500, num_samples=1000):
+        self.samples = fit_gp(X_train, Y_train, num_warmup, num_samples)
         params = {key: self.samples[key].mean() for key in ["var", "length", "noise"]}
         print(
             "Fitted variance:",

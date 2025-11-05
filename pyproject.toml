@@ -9,6 +9,7 @@ dependencies = [
     "gpjax>=0.12.2",
     "jax[cuda12]>=0.7.1",
     "numpyro>=0.19.0",
+    "pandas>=2.3.3",
     "pillow>=11.3.0",
     "py-spy>=0.4.1",
     "pyright>=1.1.405",

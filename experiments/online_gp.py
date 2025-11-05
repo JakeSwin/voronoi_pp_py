@@ -6,7 +6,7 @@ from jax import lax
 from PIL import Image
 
 from src.gps.numpyro_gp import GP
-from src.util import normalize_min_max
+from src.util import normalize_min_max, normalize
 
 
 def get_normed_maps(gp, X, y):
@@ -68,9 +68,14 @@ if __name__ == "__main__":
     xx_flipped = jnp.where(reverse_mask, xx[:, ::-1], xx)
     coords = jnp.stack([xx_flipped.ravel(), yy.ravel()], axis=-1)
     gt_values = gt_gp.predict(samples, weed_chance, coords)[0]
+    # gt_values = jnp.where(gt_values < 0, 0.0, gt_values)
+    # gt_values, mean, std = normalize(gt_values)
 
     test_gp = GP(texture_size, width, height)
     test_gp.fit(jnp.empty((0, 2)), jnp.empty((0,)))
+    # test_gp.fit(coords, gt_values, num_warmup=200, num_samples=400)
+    # mean_map, _ = get_normed_maps(test_gp, coords, gt_values)
+    # rr.log("GP/TestMap", rr.Image(mean_map))
 
     for i in range(1, coords.shape[0]):
         mean_map, _ = get_normed_maps(test_gp, coords[:i], gt_values[:i])
