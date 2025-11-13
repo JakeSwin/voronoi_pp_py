@@ -30,3 +30,7 @@ def jaccard_similarity(a, b):
     intersection = jnp.intersect1d(a_set, b_set).size
     union = jnp.union1d(a_set, b_set).size
     return intersection / union
+
+def find_neighbours_delaunay(delaunay, index):
+    indptr, indices = delaunay.vertex_neighbor_vertices
+    return indices[indptr[index]:indptr[index + 1]]

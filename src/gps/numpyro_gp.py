@@ -5,6 +5,7 @@ import numpyro.distributions as dist
 
 from numpyro.infer import MCMC, NUTS
 
+from src.util import normalize_min_max
 
 def kernel(X1, X2, var, length, noise=0, jitter=1e-6, include_noise=True):
     dists = jnp.sum((X1[:, None, :] - X2[None, :, :]) ** 2, axis=2)
@@ -19,13 +20,13 @@ kernel_jit = jax.jit(kernel, static_argnames=["include_noise"])
 
 
 def gp_model(X, Y=None, jitter=1e-6):
-    var = numpyro.sample("var", dist.LogNormal(0.0, 1.0))
+    var = numpyro.sample("var", dist.LogNormal(0.0, 0.5))
     # length = numpyro.sample("length", dist.LogNormal(0.0, 1.0))
     # noise = numpyro.sample("noise", dist.LogNormal(0.0, 1.0))
     # Favor larger smoothness
-    length = numpyro.sample("length", dist.LogNormal(jnp.log(100.0), 0.5))
+    length = numpyro.sample("length", dist.LogNormal(jnp.log(0.1), 0.3))
     # Prevent noise from shrinking to zero
-    noise = numpyro.sample("noise", dist.LogNormal(-1.0, 0.2))
+    noise = numpyro.sample("noise", dist.LogNormal(-3.0, 0.3))
     k = kernel(X, X, var, length, noise, jitter)
     numpyro.sample("obs", dist.MultivariateNormal(jnp.zeros(X.shape[0]), k), obs=Y)
 

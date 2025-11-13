@@ -8,22 +8,29 @@ offset_vectors = jnp.array(
     [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 0], [0, 1], [1, -1], [1, 0], [1, 1]]
 )  # For jump, scale by offset
 
+def unique_rows_hash(arr):
+    multiplier = arr[:, 1].max() + 1
+    hashes = arr[:, 0] * multiplier + arr[:, 1]
+    unique_hashes = jnp.unique(hashes)
+    unique_rows = jnp.stack((unique_hashes // multiplier,
+                             unique_hashes % multiplier), axis=-1)
+    return unique_rows
 
 class Voronoi:
     def __init__(self, size: int, seeds: Array):
         self.setup(size, seeds)
 
     def setup(self, size: int, seeds: Array):
-        seeds = jnp.round(jnp.array(seeds)).astype(jnp.int16)
+        self.seeds = jnp.round(jnp.array(seeds)).astype(jnp.int16)
         self.size = size
         self.numseeds = seeds.shape[0]
 
         with jax.default_device(jax.devices("cpu")[0]):
             # arr = jnp.zeros((size, size, 2))
             # self.seed_map = arr.at[seeds[:, 0], seeds[:, 1]].set(seeds)
-            arr = jnp.zeros((size, size, 2, 2), dtype=seeds.dtype)
-            seed_values = jnp.tile(seeds[:, None, :], (1, 2, 1))
-            self.seed_map = arr.at[seeds[:, 0], seeds[:, 1]].set(seed_values)
+            arr = jnp.zeros((size, size, 2, 2), dtype=self.seeds.dtype)
+            seed_values = jnp.tile(self.seeds[:, None, :], (1, 2, 1))
+            self.seed_map = arr.at[self.seeds[:, 0], self.seeds[:, 1]].set(seed_values)
 
             max_exp = int(jnp.floor(jnp.log2(size // 2)))
             # JFA+2 variant for more accurate border
@@ -102,7 +109,7 @@ class Voronoi:
 
         def step(i, j):
             pos = jnp.array([i, j])
-            seed_pos = jfa_map[i, j]
+            seed_pos = arr[i, j]
             return jnp.linalg.norm(seed_pos - pos)
 
         vmapped = jax.vmap(jax.vmap(step, in_axes=(None, 0)), in_axes=(0, None))
@@ -164,6 +171,15 @@ class Voronoi:
         centroids_y = sum_y / index_sum
 
         return jnp.stack([centroids_x, centroids_y], axis=1)
+
+    def get_neighbours(self, jfa_map: Array, index_map: Array, index: int):
+       idxs = jnp.where(index_map == index)
+       neighbour_seeds = jnp.unique(jfa_map[idxs[0], idxs[1]][:, 1], axis=0)
+       mask = ~jnp.all(neighbour_seeds == 0, axis=1) # Remove [0,0] seed
+       neighbour_seeds = neighbour_seeds[mask]
+       matches = (self.seeds[None, :, :] == neighbour_seeds[:, None, :]).all(-1)
+       found_indices = jnp.where(matches)[1]
+       return found_indices
 
     @staticmethod
     def get_inscribing_circles(

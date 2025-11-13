@@ -5,6 +5,7 @@ import rerun as rr
 
 from jax import lax
 from PIL import Image
+from scipy.spatial import Delaunay
 
 from src.voronoi import Voronoi, lbg_step
 from src.gps.numpyro_gp import GP
@@ -49,9 +50,11 @@ def main():
     # gp.add_samples(samples, weed_chance)
     # gp.optimise()
     # gp_map = gp.predict_map()
-    gp = GP(texture_size, width, height)
-    gp.fit(samples, weed_chance)
-    gp_map = gp.predict_map(samples, weed_chance)
+    normed_samples, _, _ = normalize_min_max(samples, crop_size, width - crop_size + 1)
+
+    gp = GP(texture_size, 1.0, height / width)
+    gp.fit(normed_samples, weed_chance)
+    gp_map = gp.predict_map(normed_samples, weed_chance)
     clamped_gp_map = jnp.where(gp_map[0] < 0, 0.0, gp_map[0])
     normed_mean_map, _, _ = normalize_min_max(clamped_gp_map)
     normed_mean_map = normed_mean_map + 0.0001
@@ -76,6 +79,23 @@ def main():
     colour_map = vr.get_colour_map(index_map, palette)
     centroids = vr.get_voro_centroids(index_map, num_samples)
     split_coords = vr.get_split(unit_vectors, circ_r / 2, centroids)
+    # Testing Neighbours
+    # neighbour_idxs = vr.get_neighbours(jfa_map, index_map, 1)
+    # c_r = jnp.repeat(centroids[1][None, :], neighbour_idxs.shape[0], axis=0)
+    # ns = centroids[neighbour_idxs]
+    # neighbour_lines = jnp.stack((c_r, ns), axis=1)
+    rows_with_nan = jnp.any(jnp.isnan(centroids), axis=1)
+    clean_centroids = centroids[~rows_with_nan]
+    tri = Delaunay(clean_centroids)
+    edges = set()
+    for simplex in tri.simplices:
+        # Each triangle contributes three edges
+        for i in range(3):
+            edge = tuple(sorted([simplex[i], simplex[(i + 1) % 3]]))
+            edges.add(edge)
+
+    neighbour_idxs = np.array(list(edges))
+    neighbour_lines = centroids[neighbour_idxs]
 
     rr.log("GP/Image", rr.Image(normed_mean_map))
     rr.log("GP/Samples", rr.Points2D(jnp.flip(new_seeds, axis=1)))
@@ -84,6 +104,7 @@ def main():
     rr.log("GP/Voronoi/Centroids", rr.Points2D(centroids))
     rr.log("GP/Voronoi/InscribingCircles", rr.Points2D(circ_points, radii=circ_r))
     rr.log("GP/Voronoi/Splits", rr.LineStrips2D(np.asarray(split_coords)))
+    rr.log("GP/Voronoi/Neighbours", rr.LineStrips2D(np.asarray(neighbour_lines))) # Show neighbours
 
     count = 0
     while True:
@@ -109,6 +130,23 @@ def main():
         colour_map_splits = vr.get_colour_map(index_map, lbg_palette)
         centroids = vr.get_voro_centroids(index_map, num_samples)
         split_coords = vr.get_split(unit_vectors, circ_r / 2, centroids)
+        # Testing neighbours
+        # neighbour_idxs = vr.get_neighbours(jfa_map, index_map, 1)
+        # c_r = jnp.repeat(centroids[1][None, :], neighbour_idxs.shape[0], axis=0)
+        # ns = centroids[neighbour_idxs]
+        # neighbour_lines = jnp.stack((c_r, ns), axis=1)
+        rows_with_nan = jnp.any(jnp.isnan(centroids), axis=1)
+        clean_centroids = centroids[~rows_with_nan]
+        tri = Delaunay(clean_centroids)
+        edges = set()
+        for simplex in tri.simplices:
+            # Each triangle contributes three edges
+            for i in range(3):
+                edge = tuple(sorted([simplex[i], simplex[(i + 1) % 3]]))
+                edges.add(edge)
+
+        neighbour_idxs = np.array(list(edges))
+        neighbour_lines = centroids[neighbour_idxs]
 
         rr.log("GP/Image", rr.Image(normed_mean_map))
         rr.log("GP/Samples", rr.Points2D(jnp.flip(new_seeds, axis=1)))
@@ -118,6 +156,7 @@ def main():
         rr.log("GP/Voronoi/Centroids", rr.Points2D(centroids))
         rr.log("GP/Voronoi/InscribingCircles", rr.Points2D(circ_points, radii=circ_r))
         rr.log("GP/Voronoi/Splits", rr.LineStrips2D(np.asarray(split_coords)))
+        rr.log("GP/Voronoi/Neighbours", rr.LineStrips2D(np.asarray(neighbour_lines))) # Show neighbours
 
         print(f"Total Changed Percent: {total_changed_percent}")
         if total_changed_percent < 0.25:

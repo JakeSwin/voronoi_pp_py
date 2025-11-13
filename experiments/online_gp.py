@@ -50,10 +50,11 @@ if __name__ == "__main__":
         return avg_pool
 
     weed_chance = jax.vmap(get_weed_chance)(samples)
+    normed_samples, _, _ = normalize_min_max(samples, crop_size, width - crop_size + 1)
 
-    gt_gp = GP(texture_size, width, height)
-    gt_gp.fit(samples, weed_chance)
-    mean_map, _ = get_normed_maps(gt_gp, samples, weed_chance)
+    gt_gp = GP(texture_size, 1.0, height / width)
+    gt_gp.fit(normed_samples, weed_chance)
+    mean_map, _ = get_normed_maps(gt_gp, normed_samples, weed_chance)
 
     rr.log("GP/GroundTruth", rr.Image(mean_map))
 
@@ -61,24 +62,31 @@ if __name__ == "__main__":
     x_points = jnp.linspace(crop_size, width - crop_size + 1, 15)
     y_points = jnp.linspace(crop_size, height - crop_size + 1, 15)
     xx, yy = jnp.meshgrid(x_points, y_points)
-
+    # Setup flipping mask
     reverse_mask = jnp.arange(x_points.shape[0]) % 2 == 1
     reverse_mask = reverse_mask[:, None]
-
+    # Flip X direction of every other row to produce lawnmower path
     xx_flipped = jnp.where(reverse_mask, xx[:, ::-1], xx)
     coords = jnp.stack([xx_flipped.ravel(), yy.ravel()], axis=-1)
-    gt_values = gt_gp.predict(samples, weed_chance, coords)[0]
+
+    normed_coords, _, _ = normalize_min_max(coords, crop_size, width - crop_size + 1)
+
+    # Predict values from Grouth Truth GP at lawnmower path locations
+    gt_values = gt_gp.predict(normed_samples, weed_chance, normed_coords)[0]
+    # gt_values = jax.vmap(get_weed_chance)(jnp.round(coords).astype(jnp.int32))
     # gt_values = jnp.where(gt_values < 0, 0.0, gt_values)
     # gt_values, mean, std = normalize(gt_values)
 
-    test_gp = GP(texture_size, width, height)
+    test_gp = GP(texture_size, 1.0, height / width)
     test_gp.fit(jnp.empty((0, 2)), jnp.empty((0,)))
     # test_gp.fit(coords, gt_values, num_warmup=200, num_samples=400)
     # mean_map, _ = get_normed_maps(test_gp, coords, gt_values)
     # rr.log("GP/TestMap", rr.Image(mean_map))
 
     for i in range(1, coords.shape[0]):
-        mean_map, _ = get_normed_maps(test_gp, coords[:i], gt_values[:i])
+        mean_map, _ = get_normed_maps(test_gp, normed_coords[:i], gt_values[:i])
         rr.log("GP/TestMap", rr.Image(mean_map))
+        rr.log("GP/Samples", rr.Points2D(normed_coords[:i] * texture_size))
+        rr.log("GP/Samples", rr.AnyValues(value=gt_values[:i].tolist()))
         if i % 50 == 0:
-            test_gp.fit(coords[:i], gt_values[:i])
+            test_gp.fit(normed_coords[:i], gt_values[:i])
