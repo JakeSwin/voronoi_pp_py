@@ -1,14 +1,17 @@
 import jax.numpy as jnp
 
+
 def normalize(array):
     mean = jnp.mean(array)
     std = jnp.std(array)
     normed = (array - mean) / std
     return normed, mean, std
 
+
 def unnormalize(normed_array, mean, std):
     original = normed_array * std + mean
     return original
+
 
 def normalize_coords(coords, mins=None, maxs=None):
     if mins is None or maxs is None:
@@ -17,12 +20,14 @@ def normalize_coords(coords, mins=None, maxs=None):
     normed = (coords - mins) / (maxs - mins)
     return normed, mins, maxs
 
+
 def normalize_min_max(coords, min=None, max=None):
     if min is None or max is None:
         min = coords.min()
         max = coords.max()
     normed = (coords - min) / (max - min)
     return normed, min, max
+
 
 def jaccard_similarity(a, b):
     a_set = jnp.unique(a)
@@ -31,6 +36,7 @@ def jaccard_similarity(a, b):
     union = jnp.union1d(a_set, b_set).size
     return intersection / union
 
+
 def find_neighbours_delaunay(delaunay, index):
     indptr, indices = delaunay.vertex_neighbor_vertices
-    return indices[indptr[index]:indptr[index + 1]]
+    return indices[indptr[index] : indptr[index + 1]]
