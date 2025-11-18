@@ -110,4 +110,10 @@ if __name__ == "__main__":
         centroids = vr.get_voro_centroids(index_map, num_seeds)
         rr.log("Voronoi/Centroids", rr.Points2D(centroids))
 
+        weighted_palette = vr.create_weighted_palette(index_map, mean_map)
+        weighted_cells = vr.get_colour_map(index_map, weighted_palette)
+        rr.log("Voronoi/WeightedCells", rr.Image(weighted_cells))
+
+        # TODO random jumps is due to voronoi diagram indexing
         planner.step(uav, index_map, centroids)
+        planner.log()

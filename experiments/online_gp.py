@@ -75,15 +75,15 @@ if __name__ == "__main__":
     gt_values = gt_gp.predict(normed_samples, weed_chance, normed_coords)[0]
 
     test_gp = GP(texture_size, 1.0, height / width)
-    # test_gp.fit(jnp.empty((0, 2)), jnp.empty((0,)))
-    test_gp.fit(normed_coords, gt_values, 500, 1000)
-    mean_map, _ = get_normed_maps(test_gp, normed_coords, gt_values)
-    rr.log("GP/TestMap", rr.Image(mean_map))
+    test_gp.fit(jnp.empty((0, 2)), jnp.empty((0,)))
+    # test_gp.fit(normed_coords, gt_values, 500, 1000)
+    # mean_map, _ = get_normed_maps(test_gp, normed_coords, gt_values)
+    # rr.log("GP/TestMap", rr.Image(mean_map))
 
-    # for i in range(1, normed_coords.shape[0]):
-    #     mean_map, _ = get_normed_maps(test_gp, normed_coords[:i], gt_values[:i])
-    #     rr.log("GP/TestMap", rr.Image(mean_map))
-    #     rr.log("GP/Samples", rr.Points2D(normed_coords[:i] * texture_size))
-    #     rr.log("GP/Samples", rr.AnyValues(value=gt_values[:i].tolist()))
-    #     if i % 50 == 0:
-    #         test_gp.fit(normed_coords[:i], gt_values[:i])
+    for i in range(1, normed_coords.shape[0]):
+        mean_map, _ = get_normed_maps(test_gp, normed_coords[:i], gt_values[:i])
+        rr.log("GP/TestMap", rr.Image(mean_map))
+        rr.log("GP/Samples", rr.Points2D(normed_coords[:i] * texture_size))
+        rr.log("GP/Samples", rr.AnyValues(value=gt_values[:i].tolist()))
+        if i % 50 == 0:
+            test_gp.fit(normed_coords[:i], gt_values[:i])

@@ -13,38 +13,40 @@ def rbf_kernel(X1, X2, var, length):
     return var * jnp.exp(-0.5 * dists / (length**2))
 
 
-def matern32_kernel(X1, X2, var_m, length_m):
+def matern32_kernel(X1, X2, var, length):
     dists = jnp.sqrt(jnp.sum((X1[:, None, :] - X2[None, :, :]) ** 2, axis=2))
     sqrt3 = jnp.sqrt(3.0)
-    scaled = sqrt3 * dists / length_m
-    return var_m * (1.0 + scaled) * jnp.exp(-scaled)
+    scaled = sqrt3 * dists / length
+    return var * (1.0 + scaled) * jnp.exp(-scaled)
 
+def matern12_kernel(X1, X2, var, length):
+    dists = jnp.sqrt(jnp.sum((X1[:, None, :] - X2[None, :, :]) ** 2, axis=2))
+    scaled = dists / length
+    return var * jnp.exp(-scaled)
 
-def combined_kernel(
-    X1, X2, var, length, var_m, length_m, noise=0, jitter=1e-6, include_noise=True
+def kernel(
+    X1, X2, var, length, noise=0, jitter=1e-6, include_noise=True
 ):
-    k_rbf = rbf_kernel(X1, X2, var, length)
-    k_matern = matern32_kernel(X1, X2, var_m, length_m)
-    k = k_rbf + k_matern
+    k = matern32_kernel(X1, X2, var, length)
     if include_noise:
         k = k + (noise + jitter) * jnp.eye(X1.shape[0])
     return k
 
 
-kernel_jit = jax.jit(combined_kernel, static_argnames=["include_noise"])
+kernel_jit = jax.jit(kernel, static_argnames=["include_noise"])
 
 
 def gp_model(X, Y=None, jitter=1e-6):
     var = numpyro.sample("var", dist.LogNormal(0.0, 0.5))
-    var_m = numpyro.sample("var_m", dist.LogNormal(0.0, 0.5))
+    # var_m = numpyro.sample("var_m", dist.LogNormal(0.0, 0.5))
     # length = numpyro.sample("length", dist.LogNormal(0.0, 1.0))
     # noise = numpyro.sample("noise", dist.LogNormal(0.0, 1.0))
     # Favor larger smoothness
     length = numpyro.sample("length", dist.LogNormal(jnp.log(0.05), 0.2))
-    length_m = numpyro.sample("length_m", dist.LogNormal(jnp.log(0.05), 0.2))
+    # length_m = numpyro.sample("length_m", dist.LogNormal(jnp.log(0.05), 0.2))
     # Prevent noise from shrinking to zero
     noise = numpyro.sample("noise", dist.LogNormal(-3.0, 0.3))
-    k = kernel_jit(X, X, var, length, var_m, length_m, noise, jitter)
+    k = kernel_jit(X, X, var, length, noise, jitter)
     numpyro.sample("obs", dist.MultivariateNormal(jnp.zeros(X.shape[0]), k), obs=Y)
 
 
@@ -56,13 +58,11 @@ def fit_gp(X_train, Y_train, num_warmup=500, num_samples=1000):
 
 
 def predict_gp(
-    X_train, Y_train, X_test, var, length, var_m, length_m, noise=0, jitter=1e-6
+    X_train, Y_train, X_test, var, length, noise=0, jitter=1e-6
 ):
-    K = kernel_jit(X_train, X_train, var, length, var_m, length_m, noise, jitter)
-    K_s = kernel_jit(
-        X_train, X_test, var, length, var_m, length_m, 0, include_noise=False
-    )
-    K_ss = kernel_jit(X_test, X_test, var, length, var_m, length_m, 0)
+    K = kernel_jit(X_train, X_train, var, length, noise, jitter)
+    K_s = kernel_jit(X_train, X_test, var, length, 0, include_noise=False)
+    K_ss = kernel_jit(X_test, X_test, var, length, 0)
 
     K_inv = jnp.linalg.inv(K)
     mu_s = jnp.dot(K_s.T, jnp.dot(K_inv, Y_train))
@@ -83,17 +83,13 @@ class GP:
         self.samples = fit_gp(X_train, Y_train, num_warmup, num_samples)
         params = {
             key: self.samples[key].mean()
-            for key in ["var", "length", "noise", "var_m", "length_m"]
+            for key in ["var", "length", "noise"]
         }
         print(
             "Fitted variance:",
             params["var"],
             "Fitted length:",
             params["length"],
-            "Fitted variance Matern:",
-            params["var_m"],
-            "Fitted length Matern:",
-            params["length_m"],
             "Fitted noise:",
             params["noise"],
         )
@@ -102,7 +98,7 @@ class GP:
         # Use mean or sample of hyperparameters to call predict_gp
         params = {
             key: self.samples[key].mean()
-            for key in ["var", "length", "noise", "var_m", "length_m"]
+            for key in ["var", "length", "noise"]
         }
         if X_train.shape[0] == 0:
             mu_s = jnp.zeros(X_test.shape[0])
