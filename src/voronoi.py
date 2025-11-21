@@ -162,10 +162,12 @@ class Voronoi:
 
         flat_index_map = index_map.ravel()
 
-        sum_x = jnp.bincount(flat_index_map, weights=coords[:, 0], length=num_seeds)
-        sum_y = jnp.bincount(flat_index_map, weights=coords[:, 1], length=num_seeds)
+        mask = flat_index_map >= 0
 
-        index_sum = jnp.bincount(flat_index_map, length=num_seeds)
+        sum_x = jnp.bincount(flat_index_map[mask], weights=coords[mask, 0], length=num_seeds)
+        sum_y = jnp.bincount(flat_index_map[mask], weights=coords[mask, 1], length=num_seeds)
+
+        index_sum = jnp.bincount(flat_index_map[mask], length=num_seeds)
 
         centroids_x = sum_x / index_sum
         centroids_y = sum_y / index_sum
@@ -245,6 +247,9 @@ class Voronoi:
         )  # shape (H*W, num_seeds)
         # argmax finds the first True per row
         indices = jnp.argmax(eq, axis=-1)
+        # Filter out unfilled seeds
+        any = jnp.any(eq, axis=1)
+        indices = jnp.where(~any, -1, indices)
         # indices: (H*W,), reshape to grid
         arr2d = indices.reshape(arr.shape[0], arr.shape[1])
         return arr2d
@@ -255,8 +260,10 @@ class Voronoi:
         flat_index_map = index_map.ravel()
         flat_weights = data_normed.ravel()
 
-        weights_sum = jnp.bincount(flat_index_map, weights=flat_weights)
-        index_sum = jnp.bincount(flat_index_map)
+        mask = flat_index_map >= 0
+
+        weights_sum = jnp.bincount(flat_index_map[mask], weights=flat_weights[mask])
+        index_sum = jnp.bincount(flat_index_map[mask])
 
         avg_voro_w = weights_sum / index_sum
 
@@ -359,7 +366,9 @@ def lbg_step(jfa_map: Array, data: Array, seeds: Array):
     flat_index_map = index_map.ravel()
     flat_weights = data_normed.ravel()
 
-    weights_sum = jnp.bincount(flat_index_map, weights=flat_weights, length=num_seeds)
+    mask = flat_index_map >= 0
+
+    weights_sum = jnp.bincount(flat_index_map[mask], weights=flat_weights[mask], length=num_seeds)
 
     lower_mask = weights_sum < LOWER_THRESHOLD
     upper_mask = weights_sum > UPPER_THRESHOLD

@@ -7,7 +7,7 @@ from jax import lax
 
 from src.util import normalize_min_max
 from src.gps.numpyro_gp import GP
-from src.planner import Planner
+from src.planner import PlannerRH
 from src.voronoi import Voronoi, lbg_step
 from src.uav import UAV
 
@@ -97,7 +97,9 @@ if __name__ == "__main__":
     uav_sample_func = lambda coord: get_weed_chance((coord/texture_size)*width)
 
     uav = UAV([texture_size/2, texture_size/2], uav_sample_func)
-    planner = Planner()
+    planner = PlannerRH()
+
+    normalisation_func = lambda samples: normalize_min_max(((samples/texture_size)*width), 0, width)
 
     while True:
         path = uav.get_full_path()
@@ -115,5 +117,5 @@ if __name__ == "__main__":
         rr.log("Voronoi/WeightedCells", rr.Image(weighted_cells))
 
         # TODO random jumps is due to voronoi diagram indexing
-        planner.step(uav, index_map, centroids)
+        planner.step(uav, gp, normalisation_func, index_map, centroids)
         planner.log()
