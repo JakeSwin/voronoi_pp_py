@@ -1,12 +1,12 @@
 import jax.numpy as jnp
 import numpy as np
 import rerun as rr
-
 from scipy.spatial import Delaunay
 
-from src.uav import UAV
 from src.gps.numpyro_gp import GP
+from src.uav import UAV
 from src.util import find_neighbours_delaunay
+
 
 def generate_candidate_paths(delaunay, starting_idx, horizon_size):
     indptr, indices = delaunay.vertex_neighbor_vertices
@@ -24,6 +24,7 @@ def generate_candidate_paths(delaunay, starting_idx, horizon_size):
 
     return candidate_paths
 
+
 class PlannerClosest:
     def __init__(self):
         self.num_steps = 0
@@ -37,8 +38,12 @@ class PlannerClosest:
 
         texture_width = index_map.shape[1]
         texture_height = index_map.shape[0]
-        current_x = jnp.clip(jnp.round(self.current_pos[0]), 0, texture_width).astype(jnp.int32)
-        current_y = jnp.clip(jnp.round(self.current_pos[1]), 0, texture_height).astype(jnp.int32)
+        current_x = jnp.clip(jnp.round(self.current_pos[0]), 0, texture_width).astype(
+            jnp.int32
+        )
+        current_y = jnp.clip(jnp.round(self.current_pos[1]), 0, texture_height).astype(
+            jnp.int32
+        )
         self.current_idx = index_map[current_y, current_x]
 
         rows_with_nan = jnp.any(jnp.isnan(centroids), axis=1)
@@ -47,8 +52,12 @@ class PlannerClosest:
         neighbour_idxs = find_neighbours_delaunay(self.tri, self.current_idx)
 
         if uav.path != None:
-            path_xs = jnp.clip(jnp.round(uav.path[:, 0]), 0, texture_width).astype(jnp.int32)
-            path_ys = jnp.clip(jnp.round(uav.path[:, 1]), 0, texture_height).astype(jnp.int32)
+            path_xs = jnp.clip(jnp.round(uav.path[:, 0]), 0, texture_width).astype(
+                jnp.int32
+            )
+            path_ys = jnp.clip(jnp.round(uav.path[:, 1]), 0, texture_height).astype(
+                jnp.int32
+            )
             path_cell_idxs = index_map[path_ys, path_xs]
             neighbour_idxs = neighbour_idxs[~jnp.isin(neighbour_idxs, path_cell_idxs)]
 
@@ -63,7 +72,12 @@ class PlannerClosest:
         self.num_steps += 1
 
     def log(self):
-        if self.tri == None or self.neighbour_points == None or self.current_pos == None or self.current_idx == None:
+        if (
+            self.tri == None
+            or self.neighbour_points == None
+            or self.current_pos == None
+            or self.current_idx == None
+        ):
             return
 
         edges = set()
@@ -80,7 +94,9 @@ class PlannerClosest:
         rr.log("Voronoi/Delaunay", rr.LineStrips2D(delaunay_lines))
 
         num_neighbour_points = self.neighbour_points.shape[0]
-        current_pos_repeat = jnp.repeat(self.current_pos[None, :], num_neighbour_points, axis=0)
+        current_pos_repeat = jnp.repeat(
+            self.current_pos[None, :], num_neighbour_points, axis=0
+        )
         neighbour_lines = jnp.stack((current_pos_repeat, self.neighbour_points), axis=1)
 
         rr.log("Voronoi/Neighbours", rr.LineStrips2D(np.asarray(neighbour_lines)))
@@ -89,6 +105,7 @@ class PlannerClosest:
         candidate_paths = centroids[candidate_path_idxs].astype(np.float32)
 
         rr.log("Voronoi/Candidates", rr.LineStrips2D(np.asarray(candidate_paths)))
+
 
 def get_information_gain(new_path, gp, X_train, Y_train):
     mu_prior, cov_prior = gp.predict(X_train, Y_train, new_path)
@@ -109,8 +126,9 @@ def get_information_gain(new_path, gp, X_train, Y_train):
 
     return info_gain
 
+
 class PlannerRH:
-    def __init__(self, horizon_size = 3):
+    def __init__(self, horizon_size=3):
         self.num_steps = 0
         self.tri = None
         self.current_pos = None
@@ -122,23 +140,34 @@ class PlannerRH:
 
         texture_width = index_map.shape[1]
         texture_height = index_map.shape[0]
-        current_x = jnp.clip(jnp.round(self.current_pos[0]), 0, texture_width).astype(jnp.int32)
-        current_y = jnp.clip(jnp.round(self.current_pos[1]), 0, texture_height).astype(jnp.int32)
+        current_x = jnp.clip(jnp.round(self.current_pos[0]), 0, texture_width).astype(
+            jnp.int32
+        )
+        current_y = jnp.clip(jnp.round(self.current_pos[1]), 0, texture_height).astype(
+            jnp.int32
+        )
         self.current_idx = index_map[current_y, current_x]
 
-        rows_with_nan = jnp.any(jnp.isnan(centroids), axis=1)
+        nan_idxs = jnp.nonzero(jnp.any(jnp.isnan(centroids), axis=1))[0]
         clean_centroids = jnp.nan_to_num(centroids, 0)
         self.tri = Delaunay(clean_centroids)
 
-        candidate_paths_idxs = generate_candidate_paths(self.tri, self.current_idx, self.horizon_size)
+        candidate_paths_idxs = generate_candidate_paths(
+            self.tri, self.current_idx, self.horizon_size
+        )
         candidate_paths_idxs = np.array(candidate_paths_idxs)[:, 1:]
+        mask = ~jnp.isin(candidate_paths_idxs[:, 0], jnp.array(nan_idxs))
+        candidate_paths_idxs = candidate_paths_idxs[mask]
         candidate_paths = clean_centroids[candidate_paths_idxs]
-        candidate_paths_normalised, _, _  = normalisation_func(candidate_paths)
+        candidate_paths_normalised, _, _ = normalisation_func(candidate_paths)
 
         current_path = uav.get_full_path()
-        normalised_current_path, _, _  = normalisation_func(current_path)
+        normalised_current_path, _, _ = normalisation_func(current_path)
 
-        eval_list = [get_information_gain(path, gp, normalised_current_path, uav.samples) for path in candidate_paths_normalised]
+        eval_list = [
+            get_information_gain(path, gp, normalised_current_path, uav.samples)
+            for path in candidate_paths_normalised
+        ]
         # Sort in desc order (larger is better)
         sorted_eval_list = np.argsort(eval_list)[::-1]
 
